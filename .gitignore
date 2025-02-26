@@ -1,0 +1,26 @@
+# Ignore Visual Studio files and folders
+.vs/
+*.vcxproj.user
+*.sln.docstates
+*.suo
+*.opensdf
+*.sdf
+*.cachefile
+*.VC.db
+ipch/
+obj/
+Debug/
+Release/
+x64/
+
+# Ignore intermediate files (like the .ipch file mentioned in the error)
+*.ipch
+
+# Ignore build output files (executables, libraries, etc.) - if applicable
+*.exe
+*.dll
+*.lib
+
+# Keep track of source files and shaders
+!*.cpp
+!*.glsl

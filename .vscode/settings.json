@@ -1,0 +1,8 @@
+{
+  "files.associations": {
+    "*.embeddedhtml": "html",
+    "algorithm": "cpp",
+    "locale": "cpp",
+    "optional": "cpp"
+  }
+}
