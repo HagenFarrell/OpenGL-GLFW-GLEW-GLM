@@ -1,7 +1,7 @@
 # OpenGL Ray Tracer
 
 A GPU-accelerated ray tracer implemented in C++ and OpenGL for a master's level computer graphics course.
-
+<img src="Screenshot 2025-02-26 191937.png" alt="Disk light sampling added" width="500"/>
 ## Implementation Features
 
 - **GPU Acceleration**: Utilizes OpenGL compute shaders for real-time ray tracing
