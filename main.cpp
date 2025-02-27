@@ -65,7 +65,7 @@ void setupWall(Molecule molecule)
     auto viewToWorld = glm::mat4(1.0f);
 
     // Flip the Y-axis to match OpenGL coordinate system. (Insane)
-    viewToWorld[1][1] = -1.0f;
+    //viewToWorld[1][1] = -1.0f;
 
     auto createWall = [&viewToWorld](const glm::mat4& transform, const glm::vec4& color)
     {
@@ -263,7 +263,7 @@ int main(void)
 
     // Assign values to send as uniforms.
     glm::vec3 upVal(0.f, 1.f, 0.f);
-    float fovVal = 45.0f * (3.14159265f / 180.0f);
+    float fovVal = 40.0f * (3.14159265f / 180.0f);
     glm::vec2 resolutionVal(WindowWidth, WindowHeight);
 
     // Get and verify uniform locations
@@ -275,7 +275,7 @@ int main(void)
 
     // Setup camera.
     float rotationAngle = 0.0f;
-    static float rotationSpeed = 0.2f;
+    static float rotationSpeed = 0.1f;
 
     // Setup walls and send to GPU.
     setupWall(molecule);
@@ -283,28 +283,27 @@ int main(void)
     glm::vec3 boxCenter = (molecule.min + molecule.max) * 0.5f;
     float diagonal = length(molecule.max - molecule.min);
 
-    //rotationAngle += rotationSpeed;
-    if (rotationAngle >= 120.0f || rotationAngle <= -120.0f)
-    {
-        rotationSpeed = -rotationSpeed; // Reverse direction
-    }
-
-    float radians = glm::radians(rotationAngle);
-    glm::vec3 cameraPos = boxCenter + glm::vec3(
-        diagonal * sin(radians),
-        0.0f,
-        diagonal * cos(radians)
-    );
-
     // Area light diameter is 1/5 the "front" wall; we only have a back wall. so.
     float lightRadius = extendedExtent.x / 10.0f;
-    glm::vec3 lightPos = cameraPos;
+
+    // Center position of top wall.
+    glm::vec3 centerTopWall = walls[1].transform * glm::vec4(0.0, 0.0, 0.0, 1.0);
+    glm::vec3 lightPos = centerTopWall + glm::vec3(0.0f, -0.51f, 0.0f);
+    glm::vec3 lightColor = glm::vec3(1.0f, 0.9f, 0.7f) * 2.0f;
 
     GLint lightPosLoc = glGetUniformLocation(computeProgram, "lightPos");
     GLint lightRadiusLoc = glGetUniformLocation(computeProgram, "lightRadius");
+    GLint lightColorLoc = glGetUniformLocation(computeProgram, "lightColor");
 
     do
     {
+        //rotationAngle += rotationSpeed;
+        float radians = glm::radians(rotationAngle);
+        glm::vec3 cameraPos = boxCenter + glm::vec3(
+            diagonal * sin(radians),
+            0.0f,
+            diagonal * cos(radians)
+        );
         // Run compute shader to fill texture
         glUseProgram(computeProgram);
 
@@ -321,6 +320,7 @@ int main(void)
         // Send the light uniforms to the shader.
         glUniform3fv(lightPosLoc, 1, value_ptr(lightPos));
         glUniform1f(lightRadiusLoc, lightRadius);
+        glUniform3fv(lightColorLoc, 1, value_ptr(lightColor));
 
         glDispatchCompute(workgroups[0], workgroups[1], workgroups[2]);
         glMemoryBarrier(GL_SHADER_IMAGE_ACCESS_BARRIER_BIT);

@@ -12,6 +12,7 @@ uniform vec2 resolution;
 // Light uniforms for sampling.
 uniform vec3 lightPos;
 uniform float lightRadius;
+uniform vec3 lightColor;
 
 //  Define the canonical box bounds as constants.
 const vec3 canonicalBoxMin = vec3(-1.0, -1.0, -1.0);
@@ -20,7 +21,7 @@ const vec3 canonicalBoxMax = vec3(1.0, 1.0, 1.0);
 // Defines a custom infinity, just a large number
 #define MY_INFINITY 1e30
 #define PI 3.14159265
-#define BIAS 0.001
+#define BIAS 0.01
 
 // Define a Ray structure
 struct Ray {
@@ -312,66 +313,97 @@ vec2 squareToDisk(vec2 square)
         // Adjustment for quadrants.
         if (offset.y < 0.0) theta += PI;
       }
+
+
+    // Scale by light radius after calculations, not during.
+    r *= lightRadius;
     
     // Map the coordinates back to cartesian.
     float x = cos(theta) * r;
     float y = sin(theta) * r;
-  
-    // Scale by light radius after calculations, not during.
-    r *= lightRadius;
-  
+    
     // Z-axis is zero so just omit it.
     return vec2(x, y);
 }
 
 vec4 calculateSampleColor(Ray ray, SceneHitResult hit, vec2 square, int totalSamples)
 {
-    if (hit.objectType <= 0)
-    {
-        // Just return black if its not intersecting anything.
-        return vec4(0.0f, 0.0f, 0.0f, 1.0f);
+    // If no hit, return background color
+    if (hit.objectType <= 0) {
+        return vec4(ray_color(ray), 1.0f);
     }
-    
+
+    // Calculate hit point in world space
     vec3 hitPoint = ray.o + ray.d * hit.t;
-    vec3 viewDir = normalize(eye - hitPoint);
-    
+
+    // Determine material color based on what was hit
+    vec3 materialColor = (hit.objectType == 1) ?
+    spheres[hit.objectIndex].color.rgb :
+    walls[hit.objectIndex].color.rgb;
+
+    // Start with ambient lighting (this ensures nothing is completely black)
+    vec3 finalColor = materialColor * 0.2;
+
+    // Calculate specific point on the area light (light sampling)
     vec2 diskOffset = squareToDisk(square);
-    vec3 diskPoint = lightPos + vec3(diskOffset.x, diskOffset.y, 0.0);
-  
-    // Yeah
-    vec3 lightDir = normalize(diskPoint - hitPoint);
+    vec3 lightPoint = lightPos + vec3(diskOffset.x, diskOffset.y, 0.0);
+
+    // Vector FROM light TO hitpoint (for consistency)
+    vec3 lightToHit = hitPoint - lightPoint;
+    float distanceToLight = length(lightToHit);
+
+    // Normalized direction vectors
+    vec3 L = normalize(-lightToHit); // Direction FROM hitpoint TO light
+    vec3 N = hit.normal;             // Surface normal
+    vec3 V = normalize(eye - hitPoint); // Direction to viewer
+
+    float shadowFactor = 1.0;
     
-    float distanceToLight = length(diskPoint - hitPoint);
-  
-    // Time to send a shadow ray back to see if anything occludes our ray.
+    // Shadow ray setup - strictly from hit point toward light
     Ray shadowRay;
-    shadowRay.o = hitPoint + hit.normal * BIAS;
-    shadowRay.d = lightDir;
-  
+    shadowRay.o = hitPoint + N * BIAS; 
+    shadowRay.d = -normalize(lightToHit); 
+    shadowRay.tmin = 0.001;
+    shadowRay.tmax = distanceToLight - 0.001; // Only test up to light distance
+
+    // Shadow test
     SceneHitResult shadowHit = findClosestIntersection(shadowRay);
-    bool occluded = shadowHit.objectType > 0 && shadowHit.t < distanceToLight;
+    bool inShadow = shadowHit.objectType > 0;
 
-    vec3 materialColor;
-
-    if(!occluded)
+    if (shadowHit.objectType > 0 )
     {
-        // Surface normal at hitpoint.
-        vec3 normal = hit.normal;
+        float occluderDistance = shadowHit.t;
+        float lightDistance = distanceToLight;
         
-        // Basic diffuse lighting computations.
-        float nDotL = max(dot(normal, lightDir), 0.0);
+        float ratio = occluderDistance / lightDistance;
         
-        // Light contribution.
-        materialColor = (hit.objectType == 1) ? spheres[hit.objectIndex].color.rgb :
-            walls[hit.objectIndex].color.rgb;
+        // Penumbra calculations - objects closer to recievcer get more shadowing.
+        // Objects closer to the light create softer shadowing.
+        shadowFactor = smoothstep(0.0, 0.2, ratio * (1.0 - ratio));
         
-        float areaFactor = PI * lightRadius * lightRadius / float(totalSamples);
-        vec3 diffuseColor = materialColor * nDotL * areaFactor / (distanceToLight * distanceToLight);
-        
-        return vec4(diffuseColor, 1.0);
+        if (ratio < 0.1) shadowFactor = 0.0;
     }
     
-  return vec4(ray_color(ray), 1.0);
+    if (shadowFactor > 0.0) {
+        // Calculate diffuse lighting
+        float diffuseFactor = max(dot(N, L), 0.0);
+
+        // Physical light attenuation with inverse square falloff
+        float attenuation = 3.0 / (1.0 + 0.25 * distanceToLight * distanceToLight);
+
+        // Apply shadow factor to diffuse component
+        vec3 diffuseColor = materialColor * diffuseFactor * shadowFactor;
+
+        // Calculate specular with Blinn-Phong model for better highlights
+        vec3 H = normalize(L + V);  // Halfway vector
+        float specFactor = pow(max(dot(N, H), 0.0), 64.0) * shadowFactor;
+        vec3 specularColor = vec3(0.5) * specFactor;
+
+        // Combine lighting components with physically-based attenuation
+        finalColor += (diffuseColor + specularColor) * attenuation;
+    }
+
+    return vec4(finalColor, 1.0);
 }
 
 // The main() function runs once per work-item (pixel).
@@ -382,9 +414,9 @@ void main()
   if (pixelCoords.x >= int(resolution.x) || pixelCoords.y >= int(resolution.y)) return;
 
   // Carry the color information throughout the sampling.
-  vec4 accumulatedColor;
+    vec4 accumulatedColor = vec4(0.0, 0.0, 0.0, 0.0);
 
-  int sampleSize = 4;
+  int sampleSize = 16;
   int totalSamples = sampleSize * sampleSize; 
 
     for (int sampleIndex = 0; sampleIndex < totalSamples; sampleIndex++)
@@ -393,7 +425,7 @@ void main()
         int x = sampleIndex / sampleSize;
         int y = sampleIndex % sampleSize;
 
-        // Calculate offset for sub-pixel.
+        // Calculate offset for subpixel.
         vec2 offset = vec2(
             (float(x) +0.5f) / float(sampleSize),
             (float(y) +0.5f) / float(sampleSize));
@@ -406,7 +438,11 @@ void main()
         accumulatedColor += sampleColor;
     }     
 
-    vec4 finalColor = accumulatedColor / float(totalSamples);    
+    vec4 finalColor = accumulatedColor / float(totalSamples);
+    
+    // Testing out tone mapping and gamma correction for fun. (based off my own research!)
+    finalColor.rgb = finalColor.rgb / (finalColor.rgb + vec3(1.0));
+    finalColor.rgb = pow(finalColor.rgb, vec3(1.0/1.4)); // Simple gamma correction
 
   // Write the color out to the image, with alpha=1
   imageStore(outputImage, pixelCoords, finalColor);
